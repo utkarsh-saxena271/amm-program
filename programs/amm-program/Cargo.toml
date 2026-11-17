@@ -21,8 +21,10 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "1.2.2"
+anchor-lang = {version = "1.2.2", features = ["init_if_needed"]}
 anchor-spl = "1.2.2"
+constant-product-curve = { git = "https://github.com/deanmlittle/constant-product-curve.git" }
+rand = "0.10.3"
 
 [dev-dependencies]
 # Cargo.lock pins LiteSVM's Rust-1.89-compatible dependency graph.

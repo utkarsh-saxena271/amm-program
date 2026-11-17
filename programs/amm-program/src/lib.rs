@@ -22,4 +22,13 @@ pub mod amm_program {
     ) -> Result<()> {
         ctx.accounts.initialize(seed, fee, authority, ctx.bumps)
     }
+
+     pub fn deposit(ctx: Context<LiquidityPool>, amount: u64, max_x: u64, max_y: u64) -> Result<()> {
+        ctx.accounts.deposit(amount, max_x, max_y)
+    }
+
+    pub fn withdraw(ctx: Context<LiquidityPool>, amount: u64, min_x: u64, min_y: u64) -> Result<()> {
+        ctx.accounts.withdraw(amount, min_x, min_y)
+    }
 }
+
