@@ -1,15 +1,16 @@
-use anchor_lang::{prelude::*};
+use anchor_lang::prelude::*;
 use anchor_spl::{
-    associated_token::AssociatedToken, token::{Mint, MintTo, Token, TokenAccount, mint_to, Transfer, transfer}
+    associated_token::AssociatedToken,
+    token::{burn, mint_to, transfer, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
 };
 
 use constant_product_curve::ConstantProduct;
 
-use crate::state::Config;
 use crate::error::AmmError;
+use crate::state::Config;
 
 #[derive(Accounts)]
-struct LiquidityPool<'info>{
+pub struct LiquidityPool<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
     pub mint_x: Account<'info, Mint>,
@@ -40,14 +41,14 @@ struct LiquidityPool<'info>{
     )]
     pub vault_y: Account<'info, TokenAccount>,
     #[account(
-        init,
+        init_if_needed,
         payer= user,
         associated_token::mint = mint_x,
         associated_token::authority = user
     )]
     pub user_x: Account<'info, TokenAccount>,
     #[account(
-        init,
+        init_if_needed,
         payer = user,
         associated_token::mint = mint_y,
         associated_token::authority = user
@@ -55,17 +56,17 @@ struct LiquidityPool<'info>{
     pub user_y: Account<'info, TokenAccount>,
     #[account(
         init_if_needed,
-        mut,
+        payer = user,
         associated_token::mint = mint_lp,
         associated_token::authority = user
     )]
     pub user_lp: Account<'info, TokenAccount>,
-    pub token_program : Program<'info, Token>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-    pub associated_token_program: Program<'info, AssociatedToken>
+    pub associated_token_program: Program<'info, AssociatedToken>,
 }
 
-impl<'info> LiquidityPool<'info>{
+impl<'info> LiquidityPool<'info> {
     pub fn deposit(
         &mut self,
         amount: u64, // Amount of LP tokens that the user wants to "claim"
@@ -86,7 +87,7 @@ impl<'info> LiquidityPool<'info>{
                     amount,
                     6,
                 )
-                .unwrap();
+                .map_err(|_| AmmError::CurveError)?;
 
                 require!(
                     amounts.x <= max_x && amounts.y <= max_y,
@@ -104,33 +105,42 @@ impl<'info> LiquidityPool<'info>{
         self.mint_lp_tokens(amount)
     }
 
-    pub fn withdraw(&mut self, amount: u64, min_x: u64, min_y: u64) -> Result<()>{
-        require!(amount > 0, AmmError::InvalidAmount);  
+    pub fn withdraw(&mut self, amount: u64, min_x: u64, min_y: u64) -> Result<()> {
+        require!(!self.config.locked, AmmError::PoolLocked);
+        require!(amount > 0, AmmError::InvalidAmount);
 
-        let (x, y) = {
-                let amounts = ConstantProduct::xy_withdraw_amounts_from_l(
-                    self.vault_x.amount,
-                    self.vault_y.amount,
-                    self.mint_lp.supply,
-                    amount,
-                    6,
-                )
-                .unwrap();
+        // burn se PEHLE calculate (burn ke baad supply badal jaata hai)
+        let amounts = ConstantProduct::xy_withdraw_amounts_from_l(
+            self.vault_x.amount,
+            self.vault_y.amount,
+            self.mint_lp.supply,
+            amount,
+            6,
+        )
+        .map_err(|_| AmmError::CurveError)?;
 
-                require!(
-                    amounts.x >= min_x && amounts.y >= min_y,
-                    AmmError::SlippageExceeded
-                );
+        require!(
+            amounts.x >= min_x && amounts.y >= min_y,
+            AmmError::SlippageExceeded
+        );
 
-                (amounts.x, amounts.y)
-            };
-
-            self.return_tokens(true, x);
-            self.return_tokens(false, y);
-
-        Ok(())
+        self.burn_lp_tokens(amount)?;
+        self.return_tokens(true, amounts.x)?;
+        self.return_tokens(false, amounts.y)
     }
-    pub fn return_tokens(&self, is_x:bool, amount: u64) -> Result<()>{
+
+    pub fn burn_lp_tokens(&self, amount: u64) -> Result<()> {
+        let cpi_accounts = Burn {
+            mint: self.mint_lp.to_account_info(),
+            from: self.user_lp.to_account_info(),
+            authority: self.user.to_account_info(),
+        };
+
+        let ctx = CpiContext::new(self.token_program.key(), cpi_accounts);
+
+        burn(ctx, amount)
+    }
+    pub fn return_tokens(&self, is_x: bool, amount: u64) -> Result<()> {
         let (from, to) = match is_x {
             true => (
                 self.vault_x.to_account_info(),
@@ -142,19 +152,22 @@ impl<'info> LiquidityPool<'info>{
             ),
         };
 
-        let cpi_program = self.token_program.key();
-
         let cpi_accounts = Transfer {
             from,
             to,
-            authority: self.user.to_account_info(),
+            authority: self.config.to_account_info(),
         };
 
-        let ctx = CpiContext::new(cpi_program, cpi_accounts);
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"config",
+            &self.config.seed.to_le_bytes(),
+            &[self.config.config_bump],
+        ]];
+
+        let ctx = CpiContext::new_with_signer(self.token_program.key(), cpi_accounts, signer_seeds);
 
         transfer(ctx, amount)
     }
-
 
     pub fn deposit_tokens(&self, is_x: bool, amount: u64) -> Result<()> {
         let (from, to) = match is_x {

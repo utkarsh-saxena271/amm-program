@@ -5,6 +5,7 @@ use anchor_spl::{
 };
 
 use crate::state::Config;
+use crate::error::AmmError;
 
 #[derive(Accounts)]
 #[instruction(seed:u64)]
@@ -16,7 +17,7 @@ pub struct Initialize<'info>{
     #[account(
         init,
         payer = initializer,
-        seeds = [b"lp", config.key.as_ref()],
+        seeds = [b"lp", config.key().as_ref()],
         bump,
         mint::decimals = 6,
         mint::authority = config
@@ -57,6 +58,7 @@ impl<'info> Initialize<'info>{
         authority:Option<Pubkey>,
         bumps:InitializeBumps
     )->Result<()>{
+        require!(fee <= 10_000, AmmError::InvalidFee);
         self.config.set_inner(Config { 
             seed , 
             authority , 

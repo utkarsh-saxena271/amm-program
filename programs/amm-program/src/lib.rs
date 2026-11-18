@@ -30,5 +30,9 @@ pub mod amm_program {
     pub fn withdraw(ctx: Context<LiquidityPool>, amount: u64, min_x: u64, min_y: u64) -> Result<()> {
         ctx.accounts.withdraw(amount, min_x, min_y)
     }
+
+    pub fn swap(ctx: Context<Swap>, amount: u64, min_amount: u64, is_x: bool)->Result<()> {
+        ctx.accounts.swap(amount, min_amount, is_x)
+    }
 }
 

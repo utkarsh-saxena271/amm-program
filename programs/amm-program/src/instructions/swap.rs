@@ -1,15 +1,15 @@
 use anchor_lang::{prelude::*};
 use anchor_spl::{
-    associated_token::AssociatedToken, token::{Mint, MintTo, Token, TokenAccount, mint_to, Transfer, transfer}
+    associated_token::AssociatedToken, token::{Mint, Token, TokenAccount, Transfer, transfer}
 };
 
-use constant_product_curve::ConstantProduct;
+use constant_product_curve::{ConstantProduct, LiquidityPair};
 
-use crate::{instructions, state::Config};
+use crate::{state::Config};
 use crate::error::AmmError;
 
 #[derive(Accounts)]
-struct Swap<'info>{
+pub struct Swap<'info>{
     #[account(mut)]
     pub user: Signer<'info>,
     pub mint_x: Account<'info, Mint>,
@@ -40,14 +40,14 @@ struct Swap<'info>{
     )]
     pub vault_y: Account<'info, TokenAccount>,
     #[account(
-        mut,
+        init_if_needed,
         payer= user,
         associated_token::mint = mint_x,
         associated_token::authority = user
     )]
     pub user_x: Account<'info, TokenAccount>,
     #[account(
-        mut,
+        init_if_needed,
         payer = user,
         associated_token::mint = mint_y,
         associated_token::authority = user
@@ -60,6 +60,7 @@ struct Swap<'info>{
 
 impl<'info> Swap<'info>{
     pub fn swap(&mut self, amount: u64, min_amount: u64, is_x:bool) -> Result<()> {
+        require!(!self.config.locked, AmmError::PoolLocked);
         require!(amount > 0, AmmError::InvalidAmount);
         let mut curve = ConstantProduct::init(
             self.vault_x.amount,
@@ -68,7 +69,7 @@ impl<'info> Swap<'info>{
             self.config.fee,
             Some(6),
         )
-        .unwrap();
+        .map_err(|_| AmmError::CurveError)?;
 
         let p = match is_x {
             true => LiquidityPair::X,
@@ -76,11 +77,11 @@ impl<'info> Swap<'info>{
         };
 
         let swap_result: constant_product_curve::SwapResult = curve
-            .swap(p, amount, min)
+            .swap(p, amount, min_amount)
             .map_err(|_| AmmError::SlippageExceeded)?;
 
         self.deposit_tokens(is_x, swap_result.deposit)?;
-        self.withdraw_tokens(is_x, swap_result.withdraw);
+        self.withdraw_tokens(is_x, swap_result.withdraw)?;
 
         Ok(())
     }
