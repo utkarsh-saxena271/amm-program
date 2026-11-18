@@ -37,13 +37,29 @@ pub struct Initialize<'info>{
         associated_token::authority = config
     )]
     pub vault_y : Account<'info, TokenAccount>,
+    /// CHECK: only address is stored, this treasury the owner of token accounts
+    pub treasury: UncheckedAccount<'info>,
     #[account(
-        init, 
+        init,
         payer = initializer,
-        seeds = [b"config", seed.to_le_bytes().as_ref()],
-        bump,
-        space = Config::DISCRIMINATOR.len() + Config::INIT_SPACE
+        associated_token::mint = mint_x,
+        associated_token::authority = treasury
     )]
+    pub treasury_x: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = initializer,
+        associated_token::mint = mint_y,
+        associated_token::authority = treasury
+    )]
+    pub treasury_y: Account<'info, TokenAccount>,
+        #[account(
+            init, 
+            payer = initializer,
+            seeds = [b"config", seed.to_le_bytes().as_ref()],
+            bump,
+            space = Config::DISCRIMINATOR.len() + Config::INIT_SPACE
+        )]
     pub config : Account<'info, Config>,
     pub token_program : Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -52,23 +68,29 @@ pub struct Initialize<'info>{
 
 impl<'info> Initialize<'info>{
     pub fn initialize(
-        &mut self,
-        seed: u64,
-        fee: u16,
-        authority:Option<Pubkey>,
-        bumps:InitializeBumps
-    )->Result<()>{
-        require!(fee <= 10_000, AmmError::InvalidFee);
-        self.config.set_inner(Config { 
-            seed , 
-            authority , 
-            mint_x: self.mint_x.key(), 
-            mint_y: self.mint_y.key(), 
-            fee, 
-            locked: false, 
-            config_bump: bumps.config, 
-            lp_bump: bumps.mint_lp
-        });
-        Ok(())
-    }
+    &mut self,
+    seed: u64,
+    fee: u16,
+    protocol_fee: u16,
+    authority: Option<Pubkey>,
+    bumps: InitializeBumps,
+) -> Result<()> {
+    require!(
+        fee as u32 + protocol_fee as u32 <= 10_000,
+        AmmError::InvalidFee
+    );
+    self.config.set_inner(Config {
+        seed,
+        authority,
+        mint_x: self.mint_x.key(),
+        mint_y: self.mint_y.key(),
+        fee,
+        protocol_fee,
+        treasury: self.treasury.key(),
+        locked: false,
+        config_bump: bumps.config,
+        lp_bump: bumps.mint_lp,
+    });
+    Ok(())
+}
 }

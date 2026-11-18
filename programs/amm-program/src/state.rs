@@ -10,5 +10,7 @@ pub struct Config {
     pub fee: u16,                  // Swap fee in basis points
     pub locked: bool,              // If the pool is locked
     pub config_bump: u8,           // Bump seed for the config account
-    pub lp_bump: u8,   
+    pub lp_bump: u8, 
+    pub treasury: Pubkey,
+    pub protocol_fee: u16,  
 }
